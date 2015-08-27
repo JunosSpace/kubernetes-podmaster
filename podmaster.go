@@ -18,12 +18,15 @@ limitations under the License.
 // if it is the master, it copies a source file into a destination file.  If it is not the master, it makes sure it is removed.
 //
 // typical usage is to copy a Pod manifest from a staging directory into the kubelet's directory, for example:
-//   podmaster --etcd-servers=http://127.0.0.1:4001 --key=scheduler --source-file=/kubernetes/kube-scheduler.manifest --dest-file=/manifests/kube-scheduler.manifest
+//   podmaster --etcd-servers=http://127.0.0.1:4001 --key=scheduler --source-file=/kubernetes/kube-scheduler.manifest
+//			--dest-file=/manifests/kube-scheduler.manifest
+//			--cmd="kube-something"
 package main
 
 import (
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -43,6 +46,7 @@ type Config struct {
 	dest        string
 	sleep       time.Duration
 	lastLease   time.Time
+	cmd         string
 }
 
 // runs the election loop. never returns.
@@ -108,8 +112,14 @@ func (c *Config) update(master bool) error {
 	}
 	switch {
 	case master && !exists:
-		return copyFile(c.src, c.dest)
-		// TODO: validate sha hash for the two files and overwrite if dest is different than src.
+		if len(c.cmd) > 0 {
+			str, err := checkAndExecuteCommand(c.cmd)
+			glog.Infof(str)
+			return err
+		} else {
+			return copyFile(c.src, c.dest)
+			// TODO: validate sha hash for the two files and overwrite if dest is different than src.
+		}
 	case !master && exists:
 		return os.Remove(c.dest)
 	}
@@ -137,6 +147,22 @@ func copyFile(src, dest string) error {
 	return ioutil.WriteFile(dest, data, 0755)
 }
 
+func checkAndExecuteCommand(cmd string) (string, error) {
+	output, err := exec.Command("pgrep", cmd).Output()
+
+	if len(output) == 0 {
+		output, err = exec.Command("service", cmd, "start").Output()
+		if err != nil {
+			glog.Infof("exiting")
+			glog.Error(err)
+			os.Exit(1) //TODO should log somehow the failure, what shou
+		}
+	} else {
+		glog.Infof("Service already running.")
+	}
+	return string(output), err
+}
+
 func initFlags(c *Config) {
 	pflag.StringVar(&c.etcdServers, "etcd-servers", "", "The comma-seprated list of etcd servers to use")
 	pflag.StringVar(&c.key, "key", "", "The key to use for the lock")
@@ -145,6 +171,7 @@ func initFlags(c *Config) {
 	pflag.StringVar(&c.src, "source-file", "", "The source file to copy from.")
 	pflag.StringVar(&c.dest, "dest-file", "", "The destination file to copy to.")
 	pflag.DurationVar(&c.sleep, "sleep", 5*time.Second, "The length of time to sleep between checking the lock.")
+	pflag.StringVar(&c.cmd, "cmd", "", "The command to execute. No parameters are supported now.")
 }
 
 func validateFlags(c *Config) {
@@ -154,12 +181,13 @@ func validateFlags(c *Config) {
 	if len(c.key) == 0 {
 		glog.Fatalf("--key=<some-key> is required")
 	}
-	if len(c.src) == 0 {
+	//TODO must be restored and made optional
+	/*if len(c.src) == 0 {
 		glog.Fatalf("--source-file=<some-file> is required")
 	}
 	if len(c.dest) == 0 {
 		glog.Fatalf("--dest-file=<some-file> is required")
-	}
+	}*/
 	if len(c.whoami) == 0 {
 		hostname, err := os.Hostname()
 		if err != nil {
