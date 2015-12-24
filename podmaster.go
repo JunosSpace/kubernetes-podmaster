@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	etcdstorage "k8s.io/kubernetes/pkg/storage/etcd"
+	etcdstorage "k8s.io/kubernetes/pkg/storage/etcd/util"
 
 	"github.com/coreos/go-etcd/etcd"
 	"github.com/golang/glog"
